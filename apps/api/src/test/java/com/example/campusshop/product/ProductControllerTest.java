@@ -1,9 +1,12 @@
 package com.example.campusshop.product;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -13,17 +16,24 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import com.example.campusshop.common.GlobalExceptionHandler;
+import com.example.campusshop.config.WebConfig;
 import com.example.campusshop.product.dto.ProductResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(ProductController.class)
-@Import(GlobalExceptionHandler.class)
+@Import({GlobalExceptionHandler.class, WebConfig.class})
+@TestPropertySource(properties = {
+        "app.cors.allowed-origins=https://student.github.io",
+        "app.cors.allowed-origin-patterns=https://*.preview.example"
+})
 class ProductControllerTest {
 
     private static final ProductResponse SAMPLE_PRODUCT = new ProductResponse(
@@ -85,5 +95,37 @@ class ProductControllerTest {
     void deletesProductsWithNoContent() throws Exception {
         mockMvc.perform(delete("/api/products/1"))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void allowsCorsForConfiguredGithubPagesOrigin() throws Exception {
+        mockMvc.perform(options("/api/products")
+                        .header(HttpHeaders.ORIGIN, "https://student.github.io")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "https://student.github.io"))
+                .andExpect(header().string(
+                        HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS, containsString("GET")))
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_MAX_AGE, "3600"));
+    }
+
+    @Test
+    void allowsCorsForMatchingOriginPattern() throws Exception {
+        mockMvc.perform(options("/api/products")
+                        .header(HttpHeaders.ORIGIN, "https://demo.preview.example")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "https://demo.preview.example"));
+    }
+
+    @Test
+    void rejectsCorsForUnknownOrigin() throws Exception {
+        mockMvc.perform(options("/api/products")
+                        .header(HttpHeaders.ORIGIN, "https://unknown.example")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET"))
+                .andExpect(status().isForbidden())
+                .andExpect(header().doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
     }
 }

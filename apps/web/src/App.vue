@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { apiDocsUrl } from "./api/client";
 import ProductCard from "./components/ProductCard.vue";
 import ProductForm from "./components/ProductForm.vue";
 import { CATEGORIES } from "./constants";
 import { useProducts } from "./composables/useProducts";
+
+const appHomeUrl = import.meta.env.BASE_URL;
 
 const {
   products,
@@ -40,7 +43,7 @@ const formError = computed(() => (notice.value?.kind === "error" ? notice.value.
 <template>
   <div class="app-frame">
     <header class="topbar">
-      <a class="brand" href="/" aria-label="Campus Shop home">
+      <a class="brand" :href="appHomeUrl" aria-label="Campus Shop home">
         <span class="brand-mark" aria-hidden="true">C</span>
         <span>
           <strong>Campus Shop</strong>
@@ -49,7 +52,7 @@ const formError = computed(() => (notice.value?.kind === "error" ? notice.value.
       </a>
 
       <nav class="topnav" aria-label="Project links">
-        <a href="/swagger-ui.html" target="_blank" rel="noreferrer">
+        <a :href="apiDocsUrl" target="_blank" rel="noreferrer">
           API docs
           <span aria-hidden="true">↗</span>
         </a>

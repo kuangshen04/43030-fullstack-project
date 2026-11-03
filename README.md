@@ -104,6 +104,10 @@ Wait for both services to start, then open:
 - Swagger UI: http://localhost:8080/swagger-ui.html
 - OpenAPI JSON: http://localhost:8080/v3/api-docs
 
+Local defaults do not require an env file. Copy `apps/web/.env.example` to
+`apps/web/.env.local` only when you want to override ports, the Vite proxy target, or
+the API URL.
+
 The database is prepared automatically by Flyway on the first API start, including
 eight demo products. Stop the applications with `Ctrl+C`, then stop PostgreSQL with:
 
@@ -131,6 +135,7 @@ pnpm db:reset
 | `pnpm typecheck` | Type-check the Vue application and generated client |
 | `pnpm test` | Run backend tests and frontend type checking |
 | `pnpm build` | Build the Vue app and package the Spring Boot jar |
+| `pnpm preview` | Serve the built Vue app locally on port 4173 |
 
 ## OpenAPI type synchronization
 
@@ -153,9 +158,18 @@ The generated types are committed so the project can be explored without first r
 the backend. Do not edit `schema.ts` manually. When a backend DTO or endpoint changes,
 run `pnpm openapi:sync` and fix any TypeScript errors in the Vue app.
 
-The API wrapper in `packages/api-client/src/index.ts` exports `Product`, `ProductInput`,
-and `ApiError` directly from the generated schema. This is what makes the frontend
-request bodies and responses type-safe at compile time.
+The sync script reads `SERVER_PORT` and defaults to
+`http://localhost:<SERVER_PORT>/v3/api-docs` (port `8080` when unset). To regenerate
+types from a deployed API, point `OPENAPI_URL` at its public document:
+
+```bash
+OPENAPI_URL=https://api.example.com/v3/api-docs pnpm openapi:sync
+```
+
+The API wrapper in `packages/api-client/src/index.ts` provides `createApiClient()` and
+exports `Product`, `ProductInput`, and `ApiError` directly from the generated schema.
+The web app selects the public API origin at build time, and this is what makes the
+frontend request bodies and responses type-safe at compile time.
 
 ## API
 
@@ -234,20 +248,158 @@ docker compose exec postgres psql -U campus -d campus_shop
 SELECT id, name, price, stock, category FROM products ORDER BY id;
 ```
 
-## Configuration
+## Configuration and split deployment
 
-The API reads these environment variables, with development defaults:
+The defaults below are for local development. Deployment is not automated yet, but the
+ports, browser API origin, and CORS settings are ready for a split deployment where the
+frontend runs on GitHub Pages and the backend runs on a Lighthouse server.
 
-| Variable | Default |
-| --- | --- |
-| `DB_URL` | `jdbc:postgresql://localhost:5432/campus_shop` |
-| `DB_USERNAME` | `campus` |
-| `DB_PASSWORD` | `campus123` |
-| `SERVER_PORT` | `8080` |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` |
+### Frontend configuration
 
-The frontend currently uses root-relative URLs and Vite's `/api` proxy. The proxy target
-is set in `apps/web/vite.config.ts`.
+Vite reads `apps/web/.env*` files. Copy `apps/web/.env.example` to
+`apps/web/.env.local` for local overrides. Values prefixed with `VITE_` are embedded in
+the static bundle at build time, so rebuild after changing them.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `VITE_DEV_SERVER_PORT` | `5173` | Vite development server port |
+| `VITE_PREVIEW_PORT` | `4173` | Vite preview server port |
+| `VITE_API_PROXY_TARGET` | `http://localhost:<SERVER_PORT>` (default `http://localhost:8080`) | Backend origin used by the Vite dev and preview proxies. Overrides the port derived from `SERVER_PORT`. |
+| `VITE_API_BASE_URL` | *(empty)* | Empty means same-origin `/api` through the Vite proxy. For a split deployment, use the public backend origin, for example `https://api.example.com`. No `/api` suffix or trailing slash. |
+| `VITE_API_DOCS_URL` | *(derived)* | Swagger UI link. Derived as `<VITE_API_BASE_URL>/swagger-ui.html`, or `/swagger-ui.html` locally. |
+| `VITE_BASE_PATH` | `/` | Static asset base. Use `/<repository>/` for a GitHub Pages project site. |
+
+#### Changing local ports
+
+`SERVER_PORT` is read by Spring Boot. When `VITE_API_PROXY_TARGET` is not set, the Vite
+dev/preview proxy and `pnpm openapi:sync` also derive their backend URL from it, so one
+variable moves the whole local API.
+
+Set the variables in the same shell as the dev command. Spring Boot does not read the
+web app's `.env*` files, so putting `SERVER_PORT` only in `apps/web/.env.local` would not
+move the backend.
+
+Bash:
+
+```bash
+SERVER_PORT=9090 VITE_DEV_SERVER_PORT=5174 pnpm dev
+```
+
+PowerShell:
+
+```powershell
+$env:SERVER_PORT = "9090"
+$env:VITE_DEV_SERVER_PORT = "5174"
+pnpm dev
+```
+
+Open http://localhost:5174. The API listens on http://localhost:9090, and the dev proxy
+forwards `/api`, `/swagger-ui`, and `/v3/api-docs` to it. Set `VITE_PREVIEW_PORT`
+separately if you want the preview server on another port.
+
+If the backend runs on another machine, override the full proxy origin with
+`VITE_API_PROXY_TARGET`:
+
+```bash
+VITE_API_PROXY_TARGET=http://10.0.0.5:9090 pnpm dev
+```
+
+### Backend configuration
+
+Spring Boot reads environment variables at runtime.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SERVER_PORT` | `8080` | Spring Boot HTTP port |
+| `DB_URL` | `jdbc:postgresql://localhost:5432/campus_shop` | PostgreSQL JDBC URL |
+| `DB_USERNAME` | `campus` | Database user |
+| `DB_PASSWORD` | `campus123` | Database password |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:4173` | Comma-separated exact browser origins allowed to call `/api/**` |
+| `CORS_ALLOWED_ORIGIN_PATTERNS` | *(empty)* | Optional wildcard origin patterns, for example `https://*.github.io` |
+| `CORS_MAX_AGE` | `3600` | Browser preflight cache duration in seconds |
+
+`server.forward-headers-strategy=framework` is enabled so `X-Forwarded-*` headers from a
+reverse proxy are honored. The database host port defaults to `5432` and can be changed
+with `POSTGRES_PORT` when starting Docker Compose. If you change it, update `DB_URL` too.
+
+### CORS behavior
+
+- CORS is enabled only for `/api/**`; Swagger UI and the OpenAPI document are normal
+  HTTP resources.
+- Allowed origins are exact origins: scheme, host, and optional port only. Do not add a
+  path or trailing slash.
+- Allowed methods are `GET`, `POST`, `PUT`, `DELETE`, and `OPTIONS`.
+- Credentials are disabled because the demo does not use cookies or authentication.
+- The defaults cover the Vite dev server (`5173`) and preview server (`4173`). If you
+  change either frontend port while using a direct `VITE_API_BASE_URL`, add the new
+  origin to `CORS_ALLOWED_ORIGINS` as well.
+- Local API calls normally go through the Vite proxy, so they are same-origin and do not
+  require CORS. CORS matters when `VITE_API_BASE_URL` points directly at another origin.
+- Exact origins and wildcard patterns can be configured together; internally they are
+  merged into Spring's origin-pattern list so one does not silently override the other.
+
+For a GitHub Pages project site, the browser origin is the GitHub Pages host, not the
+repository path:
+
+```text
+Frontend URL: https://<username>.github.io/campus-shop/
+Browser origin: https://<username>.github.io
+```
+
+Configure that exact origin on the API:
+
+```bash
+export CORS_ALLOWED_ORIGINS="https://<username>.github.io"
+```
+
+If GitHub Pages previews or several frontend origins are used, an explicit allow-list is
+still preferable. Only use a broad pattern such as
+`CORS_ALLOWED_ORIGIN_PATTERNS="https://*.github.io"` if that is acceptable for the demo.
+Restart the API after changing CORS settings.
+
+### Prepared split deployment
+
+The intended production shape is:
+
+```text
+GitHub Pages                                  Tencent Cloud Lighthouse
+https://<username>.github.io/<repository>/    https://api.example.com
+        Vue static build  ──── HTTPS ────▶    Spring Boot :8080
+                                                     │
+                                              PostgreSQL :5432
+```
+
+No Pages workflow, server provisioning, TLS certificate setup, or CD pipeline is added
+yet. The configuration needed for those steps is in place:
+
+1. Copy `apps/web/.env.production.example` to `apps/web/.env.production.local`.
+2. Set `VITE_BASE_PATH` to the repository path (for example `/campus-shop/`) and
+   `VITE_API_BASE_URL` to the public HTTPS API origin.
+3. Build the static frontend with:
+   ```bash
+   pnpm --filter @campus-shop/web build
+   ```
+   The deployable output is `apps/web/dist`. Vite rewrites asset URLs using
+   `VITE_BASE_PATH`, so project pages work under their repository subpath.
+4. Configure the backend's public origin and HTTPS termination. For example, with Nginx
+   on the Lighthouse host, proxy HTTPS traffic to the internal Spring Boot port `8080`.
+   Keep PostgreSQL private; it should not be exposed publicly.
+5. Set the backend CORS environment:
+   ```bash
+   export CORS_ALLOWED_ORIGINS="https://<username>.github.io"
+   export SERVER_PORT=8080
+   ```
+6. Optionally test the production frontend locally:
+   ```bash
+   pnpm preview
+   ```
+   With `/campus-shop/` as the base path, open http://localhost:4173/campus-shop/.
+
+Because GitHub Pages is HTTPS, the public API must also use HTTPS; otherwise browsers
+will block the requests as mixed content. `VITE_API_BASE_URL` is a build-time value, so
+changing it requires rebuilding the frontend. The API docs link points to the public
+backend's `/swagger-ui.html` automatically when `VITE_API_BASE_URL` is set; use
+`VITE_API_DOCS_URL` if the docs are hosted elsewhere or should be hidden.
 
 ### Maven mirror note
 
@@ -265,23 +417,42 @@ Run `pnpm db:up` and confirm the container is healthy with `docker compose ps`.
 
 **Port 5432 is already in use**
 
-Change the host port in `docker-compose.yml` (for example, `"5433:5432"`) and set
-`DB_URL=jdbc:postgresql://localhost:5433/campus_shop` when starting the API.
+Set `POSTGRES_PORT` to another host port before starting Compose, and update `DB_URL` to
+match. For example, `POSTGRES_PORT=5433` maps the container to host port 5433; use
+`DB_URL=jdbc:postgresql://localhost:5433/campus_shop` for the API.
 
 **OpenAPI sync fails with a connection error**
 
 Start the backend first (`pnpm dev:api`) and confirm
-http://localhost:8080/v3/api-docs responds. Then run `pnpm openapi:sync` again.
+`http://localhost:<SERVER_PORT>/v3/api-docs` responds (the default is port `8080`).
+Then run `pnpm openapi:sync` again. For a remote API, set `OPENAPI_URL` to its public
+`/v3/api-docs` URL.
+
+**CORS blocks requests from the deployed frontend**
+
+Add the exact browser origin without a path or trailing slash, for example
+`CORS_ALLOWED_ORIGINS=https://<username>.github.io`, then restart the API. Remember that
+a GitHub Pages URL ending in `/campus-shop/` still has the origin
+`https://<username>.github.io`. A previous preflight may remain cached for
+`CORS_MAX_AGE` seconds.
+
+**The frontend loads but the catalog shows an error**
+
+In local development, check the backend terminal and the API at
+`http://localhost:<SERVER_PORT>/api/products` (default `8080`). The Vite proxy forwards
+`/api` to that port, or to `VITE_API_PROXY_TARGET` when it is set. In a production build,
+confirm `VITE_API_BASE_URL` points to the public HTTPS API origin and that this origin is
+present in `CORS_ALLOWED_ORIGINS`. Rebuild after changing Vite env values.
+
+**GitHub Pages loads a blank page or missing assets**
+
+Set `VITE_BASE_PATH` to the project path, including both slashes, such as
+`/campus-shop/`. A user/organization site or custom domain uses `/`.
 
 **Maven cannot resolve dependencies**
 
 Check network access to the configured mirror, or remove `apps/api/.mvn/` and use your
 own Maven `settings.xml`.
-
-**The frontend loads but the catalog shows an error**
-
-Check the backend terminal and http://localhost:8080/api/products. The Vite dev server
-proxies `/api` to port `8080`.
 
 ## Intentional limitations
 
@@ -291,8 +462,12 @@ This is a teaching project, not a production starter:
 - No pagination; the endpoint returns the filtered catalog in one response.
 - No image uploads; category gradients are used as simple visual placeholders.
 - Prices are displayed in USD.
-- The database credentials and CORS settings are development defaults.
+- Database credentials remain development defaults and must be supplied securely in a
+  real deployment.
+- No GitHub Pages workflow, Lighthouse provisioning, TLS setup, or CD pipeline is
+  included yet.
 - There are web-layer tests rather than a full end-to-end/Testcontainers suite.
 
 Natural next steps would be adding authentication, pagination, integration tests with
-Testcontainers, and a production deployment configuration.
+Testcontainers, a GitHub Actions Pages workflow, and a reproducible Lighthouse
+deployment with Nginx and TLS.

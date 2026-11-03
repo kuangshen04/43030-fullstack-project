@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import openapiTS, { astToString } from "openapi-typescript";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const sourceUrl = process.env.OPENAPI_URL ?? "http://localhost:8080/v3/api-docs";
+const backendPort = process.env.SERVER_PORT ?? "8080";
+const sourceUrl =
+  process.env.OPENAPI_URL ?? `http://localhost:${backendPort}/v3/api-docs`;
 const snapshotPath = path.join(rootDir, "openapi", "openapi.json");
 const typesPath = path.join(
   rootDir,

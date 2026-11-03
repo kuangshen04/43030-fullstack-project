@@ -3,17 +3,22 @@ import createClient from "openapi-fetch";
 import type { components, paths } from "./generated/schema";
 
 /**
- * Typed HTTP client for the Campus Shop API.
+ * Creates a typed HTTP client for the Campus Shop API.
  *
- * Requests use root-relative paths so the Vite dev proxy can forward `/api`
- * calls to Spring Boot. The types come from the OpenAPI document, not from
- * hand-written interfaces.
+ * Local development uses an empty base URL so requests stay root-relative and
+ * flow through the Vite proxy. A split deployment (for example, GitHub Pages
+ * frontend + Lighthouse backend) passes an absolute API origin here.
  */
-export const api = createClient<paths>({
-  headers: {
-    Accept: "application/json",
-  },
-});
+export function createApiClient(baseUrl = "") {
+  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
+
+  return createClient<paths>({
+    ...(normalizedBaseUrl ? { baseUrl: normalizedBaseUrl } : {}),
+    headers: {
+      Accept: "application/json",
+    },
+  });
+}
 
 export type Product = components["schemas"]["Product"];
 export type ProductInput = components["schemas"]["ProductInput"];

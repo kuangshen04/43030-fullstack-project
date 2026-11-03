@@ -17,6 +17,7 @@
     "db:reset": "docker compose down -v && docker compose up -d --wait postgres",
     "openapi:sync": "node scripts/sync-openapi.mjs",
     "build": "pnpm --filter @campus-shop/web build && pnpm --filter @campus-shop/api build",
+    "preview": "pnpm --filter @campus-shop/web preview",
     "typecheck": "pnpm --filter @campus-shop/web typecheck",
     "test": "pnpm --filter @campus-shop/api test && pnpm --filter @campus-shop/web typecheck"
   },

@@ -7,6 +7,8 @@ apps/web/.vite/
 # Local environment overrides
 .env
 .env.local
+.env.development
+.env.production
 *.local
 
 # Logs and editor files

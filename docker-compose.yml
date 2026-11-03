@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: campus
       POSTGRES_PASSWORD: campus123
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - campus_shop_data:/var/lib/postgresql/data
     healthcheck:

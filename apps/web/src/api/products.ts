@@ -1,5 +1,6 @@
-import { api } from "@campus-shop/api-client";
 import type { Product, ProductInput } from "@campus-shop/api-client";
+
+import { api } from "./client";
 
 export interface ProductFilters {
   keyword?: string;
