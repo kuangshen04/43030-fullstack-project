@@ -1,0 +1,10 @@
+{
+  "name": "@campus-shop/api",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "mvn -q spring-boot:run",
+    "build": "mvn -q -DskipTests package",
+    "test": "mvn -q test"
+  }
+}

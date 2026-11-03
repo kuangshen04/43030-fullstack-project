@@ -1,0 +1,21 @@
+# Dependencies and build output
+node_modules/
+dist/
+target/
+apps/web/.vite/
+
+# Local environment overrides
+.env
+.env.local
+*.local
+
+# Logs and editor files
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# TypeScript build info
+*.tsbuildinfo

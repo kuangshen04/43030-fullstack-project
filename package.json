@@ -1,0 +1,27 @@
+{
+  "name": "campus-shop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A minimal full-stack campus marketplace for student project demos.",
+  "packageManager": "pnpm@12.11.2",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0",
+    "pnpm": ">=12.0.0"
+  },
+  "scripts": {
+    "dev": "concurrently --kill-others -n api,web -c blue,green \"pnpm dev:api\" \"pnpm dev:web\"",
+    "dev:api": "pnpm --filter @campus-shop/api dev",
+    "dev:web": "pnpm --filter @campus-shop/web dev",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && docker compose up -d --wait postgres",
+    "openapi:sync": "node scripts/sync-openapi.mjs",
+    "build": "pnpm --filter @campus-shop/web build && pnpm --filter @campus-shop/api build",
+    "typecheck": "pnpm --filter @campus-shop/web typecheck",
+    "test": "pnpm --filter @campus-shop/api test && pnpm --filter @campus-shop/web typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6",
+    "openapi-typescript": "^7.13.0"
+  }
+}
