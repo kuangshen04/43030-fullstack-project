@@ -29,13 +29,29 @@ does not use `ResetInstance` because this application needs multiple cooperating
 containers, an image-free backend deployment, and stable ACME certificate storage. The
 database remains ephemeral as required.
 
+## Build and transfer strategy
+
+The GitHub-hosted runner is geographically far from the Lighthouse instance, and a
+30 MB jar upload over SSH was prohibitively slow. Instead:
+
+1. GitHub Actions runs the backend tests.
+2. It uploads a small archive of `apps/api` source, the Compose file, and the Caddyfile.
+3. `remote-deploy.sh` stops the old stack and builds the executable jar on the server
+   using the public `maven:3.9-eclipse-temurin-21` image.
+4. Maven's dependency cache lives in `/opt/campus-shop/.m2` between releases.
+5. The new API, PostgreSQL, and Caddy containers start together.
+
+The first server-side build pulls the Maven image and dependencies and is slower.
+Subsequent builds reuse both Docker images and the Maven cache. A measured redeploy with
+a warm Maven image and cache is roughly 100 seconds.
+
 ## Files
 
 | File | Purpose |
 | --- | --- |
 | `docker-compose.yml` | Caddy, Spring Boot, and PostgreSQL services |
 | `Caddyfile` | Automatic HTTPS for the public IP and reverse proxy to the API |
-| `remote-deploy.sh` | Runs on the server and recreates the stack with a fresh DB password |
+| `remote-deploy.sh` | Runs on the server, builds the jar, and recreates the stack |
 | `.env.example` | Manual deployment example; `.env` is generated on the server |
 | `known_hosts` | Pins the Lighthouse SSH host key used by GitHub Actions |
 
@@ -44,17 +60,17 @@ database remains ephemeral as required.
 Prerequisites: Docker and Docker Compose on the server, ports 80 and 443 open, and SSH
 access for the `ubuntu` user with passwordless `sudo`.
 
-Build the jar locally:
+Create a small source archive:
 
 ```bash
-pnpm --filter @campus-shop/api build
+tar -czf api-source.tgz -C apps/api pom.xml src .mvn
 ```
 
-Upload the deployable files:
+Upload the archive and deployment files:
 
 ```bash
-scp apps/api/target/campus-shop-api-0.0.1-SNAPSHOT.jar \
-  ubuntu@106.54.199.108:/opt/campus-shop/app.jar.new
+scp api-source.tgz \
+  ubuntu@106.54.199.108:/opt/campus-shop/api-source.tgz.new
 scp deploy/lighthouse/docker-compose.yml \
   deploy/lighthouse/Caddyfile \
   deploy/lighthouse/remote-deploy.sh \
@@ -86,13 +102,13 @@ Automatic renewals happen inside the Caddy container roughly every four days.
 
 ## GitHub Actions deployment
 
-The `deploy-api.yml` workflow builds the jar, uploads it over SSH, and runs
-`remote-deploy.sh`. It requires one repository secret, `LIGHTHOUSE_SSH_KEY`, containing a
-private key whose public key is authorized for `ubuntu@106.54.199.108`. The SSH host key
-is pinned in `known_hosts`.
+The `deploy-api.yml` workflow runs the backend tests, uploads the source archive over
+SSH, and runs `remote-deploy.sh`. It requires one repository secret,
+`LIGHTHOUSE_SSH_KEY`, containing a private key whose public key is authorized for
+`ubuntu@106.54.199.108`. The SSH host key is pinned in `known_hosts`.
 
 The workflow is triggered by pushes to `master` that touch the API or `deploy/lighthouse`,
-and can also be run manually from the Actions tab.
+and can also be run manually from the Actions tab. Concurrent runs are serialized.
 
 ## Troubleshooting
 
@@ -108,6 +124,10 @@ sudo docker compose exec caddy wget -qO- http://api:8080/api/products
 
 # Caddy certificate state
 sudo docker compose logs caddy | grep -Ei 'certificate|acme|error'
+
+# Maven build cache and source
+ls -la /opt/campus-shop/.m2
+ls -la /opt/campus-shop/src
 ```
 
 If the public IP or SSH host key changes, update:

@@ -4,3 +4,7 @@ packages:
 
 allowBuilds:
   esbuild: true
+
+# This teaching project commits a lockfile and relies on frozen installs. Disable
+# pnpm 12's release-age gate so CI and local installs resolve the same lockfile.
+minimumReleaseAge: 0

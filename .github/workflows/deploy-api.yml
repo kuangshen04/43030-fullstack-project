@@ -37,9 +37,12 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Build and test API
+      - name: Test API
         working-directory: apps/api
-        run: mvn -B package
+        run: mvn -B test
+
+      - name: Create source archive
+        run: tar -czf api-source.tgz -C apps/api pom.xml src .mvn
 
       - name: Configure SSH
         env:
@@ -55,21 +58,22 @@ jobs:
       - name: Upload release files
         run: |
           set -euo pipefail
-          JAR=$(find apps/api/target -maxdepth 1 -name '*.jar' ! -name '*.original' | head -n 1)
-          test -n "$JAR"
+          SSH_OPTIONS=(-o ServerAliveInterval=30 -o ServerAliveCountMax=10)
 
-          ssh "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST" \
+          ssh "${SSH_OPTIONS[@]}" "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST" \
             "sudo -n mkdir -p '$APP_DIR' && sudo -n chown '$LIGHTHOUSE_USER:$LIGHTHOUSE_USER' '$APP_DIR'"
-          scp "$JAR" "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST:$APP_DIR/app.jar.new"
-          scp deploy/lighthouse/docker-compose.yml \
+          scp "${SSH_OPTIONS[@]}" api-source.tgz \
+            "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST:$APP_DIR/api-source.tgz.new"
+          scp "${SSH_OPTIONS[@]}" deploy/lighthouse/docker-compose.yml \
               deploy/lighthouse/Caddyfile \
               deploy/lighthouse/remote-deploy.sh \
               "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST:$APP_DIR/"
 
-      - name: Recreate containers
+      - name: Build on server and recreate containers
         run: |
           set -euo pipefail
-          ssh "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST" \
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
+            "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST" \
             "cd '$APP_DIR' && SITE_ADDRESS='$SITE_ADDRESS' FRONTEND_ORIGIN='$FRONTEND_ORIGIN' bash remote-deploy.sh"
 
       - name: Wait for HTTPS API

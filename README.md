@@ -382,7 +382,7 @@ Two GitHub Actions workflows handle releases:
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | `deploy-pages.yml` | Web/client changes on `master`, or manual | Builds with the repository base path and API origin, then deploys to GitHub Pages |
-| `deploy-api.yml` | API/deployment changes on `master`, or manual | Tests and packages the jar, uploads it over SSH, and recreates the Compose stack |
+| `deploy-api.yml` | API/deployment changes on `master`, or manual | Tests the API, uploads a small source archive, builds the jar on the server, and recreates the Compose stack |
 
 The backend uses a Let's Encrypt IP address certificate managed by Caddy. No domain name
 is required. The certificate has a six-day lifetime and is renewed automatically. Caddy's
@@ -390,8 +390,8 @@ certificate state lives in a Docker volume so it survives application redeployme
 
 PostgreSQL intentionally has **no persistent volume**. Every API deployment recreates
 the stack, Flyway runs the migration again, and the eight demo products are restored.
-API changes therefore cause a short outage of roughly one minute; this is acceptable for
-a classroom demo.
+API changes therefore cause a short outage while the jar is compiled and the containers
+restart; this is acceptable for a classroom demo.
 
 Detailed server setup, manual deployment instructions, and troubleshooting are in
 [deploy/lighthouse/README.md](deploy/lighthouse/README.md). The GitHub Actions workflow
