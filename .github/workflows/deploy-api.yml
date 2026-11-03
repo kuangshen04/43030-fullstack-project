@@ -1,0 +1,105 @@
+name: Deploy API to Lighthouse
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "apps/api/**"
+      - "deploy/lighthouse/**"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-api-lighthouse
+  cancel-in-progress: false
+
+env:
+  LIGHTHOUSE_HOST: 106.54.199.108
+  LIGHTHOUSE_USER: ubuntu
+  APP_DIR: /opt/campus-shop
+  SITE_ADDRESS: 106.54.199.108
+  FRONTEND_ORIGIN: https://kuangshen04.github.io
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build and test API
+        working-directory: apps/api
+        run: mvn -B package
+
+      - name: Configure SSH
+        env:
+          LIGHTHOUSE_SSH_KEY: ${{ secrets.LIGHTHOUSE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$LIGHTHOUSE_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          cp deploy/lighthouse/known_hosts ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload release files
+        run: |
+          set -euo pipefail
+          JAR=$(find apps/api/target -maxdepth 1 -name '*.jar' ! -name '*.original' | head -n 1)
+          test -n "$JAR"
+
+          ssh "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST" \
+            "sudo -n mkdir -p '$APP_DIR' && sudo -n chown '$LIGHTHOUSE_USER:$LIGHTHOUSE_USER' '$APP_DIR'"
+          scp "$JAR" "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST:$APP_DIR/app.jar.new"
+          scp deploy/lighthouse/docker-compose.yml \
+              deploy/lighthouse/Caddyfile \
+              deploy/lighthouse/remote-deploy.sh \
+              "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST:$APP_DIR/"
+
+      - name: Recreate containers
+        run: |
+          set -euo pipefail
+          ssh "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST" \
+            "cd '$APP_DIR' && SITE_ADDRESS='$SITE_ADDRESS' FRONTEND_ORIGIN='$FRONTEND_ORIGIN' bash remote-deploy.sh"
+
+      - name: Wait for HTTPS API
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --max-time 15 \
+              "https://$SITE_ADDRESS/api/products" >/dev/null; then
+              echo "API is reachable over HTTPS."
+              exit 0
+            fi
+            echo "Waiting for API (attempt $attempt/30)..."
+            sleep 5
+          done
+          echo "API did not become ready." >&2
+          exit 1
+
+      - name: Verify CORS for GitHub Pages
+        run: |
+          set -euo pipefail
+          headers=$(curl --silent --show-error --max-time 20 \
+            --header "Origin: $FRONTEND_ORIGIN" \
+            --dump-header - \
+            --output /dev/null \
+            "https://$SITE_ADDRESS/api/products")
+          echo "$headers" | tr -d '\r' | grep -qi "^access-control-allow-origin: $FRONTEND_ORIGIN$"
+          echo "CORS response verified."
+
+      - name: Show remote logs on failure
+        if: failure()
+        run: |
+          ssh "$LIGHTHOUSE_USER@$LIGHTHOUSE_HOST" \
+            "cd '$APP_DIR' 2>/dev/null && sudo -n docker compose ps && sudo -n docker compose logs --tail=100 || true"

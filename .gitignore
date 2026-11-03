@@ -3,6 +3,8 @@ node_modules/
 dist/
 target/
 apps/web/.vite/
+deploy/lighthouse/app.jar
+deploy/lighthouse/app.jar.new
 
 # Local environment overrides
 .env

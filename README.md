@@ -10,6 +10,12 @@ and a frontend API client generated from the backend's OpenAPI document.
 > All repository content is in English: UI copy, documentation, comments, seed data,
 > test data, and application messages.
 
+## Live demo
+
+- App: https://kuangshen04.github.io/43030-fullstack-project/
+- API: https://106.54.199.108/api/products
+- Swagger UI: https://106.54.199.108/swagger-ui.html
+
 ![Campus Shop dashboard](docs/screenshot.png)
 
 ## Tech stack
@@ -24,6 +30,7 @@ and a frontend API client generated from the backend's OpenAPI document.
 | API documentation | springdoc-openapi + Swagger UI |
 | Monorepo | pnpm workspace |
 | Local infrastructure | Docker Compose |
+| Deployment | GitHub Pages + Tencent Cloud Lighthouse + Caddy |
 
 ## Architecture
 
@@ -357,49 +364,46 @@ still preferable. Only use a broad pattern such as
 `CORS_ALLOWED_ORIGIN_PATTERNS="https://*.github.io"` if that is acceptable for the demo.
 Restart the API after changing CORS settings.
 
-### Prepared split deployment
+### Deployment
 
-The intended production shape is:
+The project is deployed in the intended split shape:
 
 ```text
-GitHub Pages                                  Tencent Cloud Lighthouse
-https://<username>.github.io/<repository>/    https://api.example.com
-        Vue static build  ──── HTTPS ────▶    Spring Boot :8080
-                                                     │
-                                              PostgreSQL :5432
+GitHub Pages                                      Tencent Cloud Lighthouse
+https://kuangshen04.github.io/43030-fullstack-project/
+        Vue static build  ──── HTTPS + CORS ───▶  https://106.54.199.108
+                                                       │ Caddy :80/:443
+                                                       ├─ API :8080 (internal)
+                                                       └─ PostgreSQL (internal, ephemeral)
 ```
 
-No Pages workflow, server provisioning, TLS certificate setup, or CD pipeline is added
-yet. The configuration needed for those steps is in place:
+Two GitHub Actions workflows handle releases:
 
-1. Copy `apps/web/.env.production.example` to `apps/web/.env.production.local`.
-2. Set `VITE_BASE_PATH` to the repository path (for example `/campus-shop/`) and
-   `VITE_API_BASE_URL` to the public HTTPS API origin.
-3. Build the static frontend with:
-   ```bash
-   pnpm --filter @campus-shop/web build
-   ```
-   The deployable output is `apps/web/dist`. Vite rewrites asset URLs using
-   `VITE_BASE_PATH`, so project pages work under their repository subpath.
-4. Configure the backend's public origin and HTTPS termination. For example, with Nginx
-   on the Lighthouse host, proxy HTTPS traffic to the internal Spring Boot port `8080`.
-   Keep PostgreSQL private; it should not be exposed publicly.
-5. Set the backend CORS environment:
-   ```bash
-   export CORS_ALLOWED_ORIGINS="https://<username>.github.io"
-   export SERVER_PORT=8080
-   ```
-6. Optionally test the production frontend locally:
-   ```bash
-   pnpm preview
-   ```
-   With `/campus-shop/` as the base path, open http://localhost:4173/campus-shop/.
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `deploy-pages.yml` | Web/client changes on `master`, or manual | Builds with the repository base path and API origin, then deploys to GitHub Pages |
+| `deploy-api.yml` | API/deployment changes on `master`, or manual | Tests and packages the jar, uploads it over SSH, and recreates the Compose stack |
 
-Because GitHub Pages is HTTPS, the public API must also use HTTPS; otherwise browsers
-will block the requests as mixed content. `VITE_API_BASE_URL` is a build-time value, so
-changing it requires rebuilding the frontend. The API docs link points to the public
-backend's `/swagger-ui.html` automatically when `VITE_API_BASE_URL` is set; use
-`VITE_API_DOCS_URL` if the docs are hosted elsewhere or should be hidden.
+The backend uses a Let's Encrypt IP address certificate managed by Caddy. No domain name
+is required. The certificate has a six-day lifetime and is renewed automatically. Caddy's
+certificate state lives in a Docker volume so it survives application redeployments.
+
+PostgreSQL intentionally has **no persistent volume**. Every API deployment recreates
+the stack, Flyway runs the migration again, and the eight demo products are restored.
+API changes therefore cause a short outage of roughly one minute; this is acceptable for
+a classroom demo.
+
+Detailed server setup, manual deployment instructions, and troubleshooting are in
+[deploy/lighthouse/README.md](deploy/lighthouse/README.md). The GitHub Actions workflow
+requires one repository secret, `LIGHTHOUSE_SSH_KEY`, containing a dedicated private key
+authorized on the Lighthouse server.
+
+For a local production-like build, copy `apps/web/.env.production.example` to
+`apps/web/.env.production.local`, adjust the base path and API origin, and run
+`pnpm --filter @campus-shop/web build`. Vite writes the deployable output to
+`apps/web/dist`. Because GitHub Pages is HTTPS, the API must also use HTTPS.
+`VITE_API_BASE_URL` is a build-time value, so changing it requires rebuilding the
+frontend; the API docs link is derived automatically from that value.
 
 ### Maven mirror note
 
@@ -462,12 +466,9 @@ This is a teaching project, not a production starter:
 - No pagination; the endpoint returns the filtered catalog in one response.
 - No image uploads; category gradients are used as simple visual placeholders.
 - Prices are displayed in USD.
-- Database credentials remain development defaults and must be supplied securely in a
-  real deployment.
-- No GitHub Pages workflow, Lighthouse provisioning, TLS setup, or CD pipeline is
-  included yet.
+- The deployed database is intentionally ephemeral and resets on every backend release.
+- Releases are not zero-downtime; the API container is recreated.
 - There are web-layer tests rather than a full end-to-end/Testcontainers suite.
 
 Natural next steps would be adding authentication, pagination, integration tests with
-Testcontainers, a GitHub Actions Pages workflow, and a reproducible Lighthouse
-deployment with Nginx and TLS.
+Testcontainers, and a custom domain with zero-downtime deployment.
